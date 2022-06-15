@@ -1,0 +1,114 @@
+---
+title: "p value extraction for plotting"
+author: "andrew hall"
+date: '2022-06-09'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+\section{Introduction}
+
+This markdown document uses the mock data from the R workshop folder; you can read in your own data and replace the variable names to complete anova & Tukey,  extract significance from the test output, and incorporate the significance letters on a bar plot.
+
+You can use this script to generate a report of your data, as well as to create a figure and export to .png
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(multcompView)
+library(RColorBrewer)
+library(gt)
+library(knitr)
+```
+
+\subsection{Output of Statistical Tests}
+
+```{r read in data and conduct statistical test, echo=FALSE}
+##Read in dummy data from R workshop
+data <- read.table('starch_data.txt', header=TRUE, sep='\t')
+fit<-aov(starch~genotype, data=data)
+tuk <- TukeyHSD(fit, "genotype", ordered=TRUE)
+
+summary.aov(fit)
+plot(tuk)
+
+print(tuk)
+```
+\subsection{Worked up Mean and SD Data with Significance Labels}
+
+```{r work up data for plotting, echo=FALSE}
+
+##Extract p-values from the Tukey output using multcompView
+pvalues<-extract_p(tuk)
+pvalueslist<-pvalues$genotype
+##Turn p-values vector into a matrix
+pvaluesmat<-vec2mat(pvalueslist, sep="-")
+##Use multcompLetters command to determine significance for each genotype
+###You can adjust which p-value threshold you want to use!
+sigletters<-multcompLetters(pvaluesmat, compare="<", threshold=0.05, Letters=c(letters, LETTERS, "."), reversed=FALSE)
+##Make significance letters into a data frame
+
+sigletters<-sigletters$Letters
+sigletters<-as.data.frame(sigletters)
+##Make row names into a normal column
+rows<-row.names(sigletters)
+row.names(sigletters)=NULL
+sigletters<-cbind(genotype=rows, sigletters)
+sigletters<-sigletters%>%
+  arrange(genotype)##this is important!
+sigvec<-c(sigletters$sigletters)
+
+##Make a new data frame with means and SDs for creating bar graph
+datasum<-data%>%
+  group_by(genotype)%>%
+  summarise_at(vars(starch), list(mean=mean, sd=sd))%>%
+  arrange(genotype)%>%
+  cbind(sigletters=sigvec)%>%
+  ##Reorder your groups in custom order (ie put WT first)
+  mutate(genotype=fct_relevel(genotype, "WT", "MutA", "MutB", "MutC", "MutD"))%>%
+  as_tibble()
+
+datasum%>%
+  gt()%>%
+  tab_header(title="Summary Data")
+```
+\subsection{Generation of Bar Plots}
+```{r make plot, echo=FALSE}
+
+##Now you have everything needed to make a ggplot
+
+starch_plot<-ggplot()+
+  ##add columns with the mean data
+  geom_col(data=datasum, width=0.5, aes(x=genotype, y=mean, fill=genotype))+
+  ##you can customize the colors of each bar
+  scale_fill_manual(values=c("WT"="grey",
+                             "MutA"="maroon",
+                             "MutB"="maroon",
+                             "MutC"="maroon",
+                             "MutD"="maroon"
+  ))+
+  ##add in all the data points from the raw data
+  geom_point(data=data, aes(x=genotype, y=starch))+
+  ##add error bars
+  geom_errorbar(data=datasum, width=0.1, aes(ymin=mean-sd, ymax=mean+sd, x=genotype))+
+  ##add significance labels
+  geom_text(data=datasum, aes(x=genotype, y=(mean+sd+3), label=sigletters))+
+  ylab("Starch Content")+
+  xlab("Genotype")+
+  theme(
+    legend.position="none",
+    plot.background = element_rect(color="white"),
+    panel.background=element_blank(),
+    axis.line = element_line(color="black")
+  )
+starch_plot
+
+#optionally, you can export your plot to .png using the following command (uncomment to use):
+
+#ggsave("plotname.png", plot=starch_plot, dpi=1000)
+
+
+```
